@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { CardSearch } from "@/components/card-search";
 import { CollectionList } from "@/components/collection-list";
@@ -28,10 +29,18 @@ export default async function Home() {
         </form>
       </header>
 
-      <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-neutral-300">
-          Add a card
-        </h2>
+      <section className="flex flex-col gap-3">
+        <Link
+          href="/scan"
+          className="flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg shadow-emerald-900/50 transition hover:bg-emerald-500"
+        >
+          <span aria-hidden>📷</span> Scan a card
+        </Link>
+        <div className="flex items-center gap-2 text-xs text-neutral-500">
+          <span className="h-px flex-1 bg-neutral-800" />
+          or search
+          <span className="h-px flex-1 bg-neutral-800" />
+        </div>
         <CardSearch />
       </section>
 

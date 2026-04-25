@@ -36,6 +36,35 @@ export interface ScryfallCard {
 }
 
 /**
+ * Fuzzy-match a (possibly noisy) name against Scryfall. Returns the card on
+ * success, `null` on a 404 (ambiguous / no match), and throws on transport /
+ * 5xx errors so the caller can surface them.
+ */
+export async function fetchScryfallFuzzy(
+  name: string,
+): Promise<ScryfallCard | null> {
+  const url = new URL(`${SCRYFALL_BASE}/cards/named`);
+  url.searchParams.set("fuzzy", name);
+  const res = await fetch(url.toString(), { headers: SCRYFALL_HEADERS });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Scryfall fuzzy returned ${res.status}`);
+  return (await res.json()) as ScryfallCard;
+}
+
+/**
+ * Autocomplete fallback when fuzzy match is ambiguous. Returns up to 20
+ * candidate card names.
+ */
+export async function fetchScryfallAutocomplete(q: string): Promise<string[]> {
+  const url = new URL(`${SCRYFALL_BASE}/cards/autocomplete`);
+  url.searchParams.set("q", q);
+  const res = await fetch(url.toString(), { headers: SCRYFALL_HEADERS });
+  if (!res.ok) return [];
+  const json = (await res.json()) as { data?: string[] };
+  return json.data ?? [];
+}
+
+/**
  * Map a Scryfall card payload to our `cards` table row shape.
  */
 export function cardRowFromScryfall(card: ScryfallCard) {

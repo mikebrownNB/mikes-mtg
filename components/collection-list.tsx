@@ -95,7 +95,12 @@ export async function CollectionList() {
                 <div className="h-16 w-12 flex-shrink-0 rounded bg-neutral-800" />
               )}
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">{card.name}</p>
+                <p className="truncate text-sm font-medium">
+                  {card.name}
+                  {row.foil && (
+                    <span className="ml-1 text-xs text-amber-400">✦</span>
+                  )}
+                </p>
                 <p className="truncate text-xs text-neutral-500">
                   {card.set_code?.toUpperCase()} · {card.type_line ?? ""}
                 </p>

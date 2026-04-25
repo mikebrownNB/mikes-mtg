@@ -30,8 +30,10 @@ export async function POST(request: Request) {
 
   const body = (await request.json().catch(() => null)) as {
     name?: unknown;
+    foil?: unknown;
   } | null;
   const name = typeof body?.name === "string" ? body.name.trim() : "";
+  const foil = body?.foil === true;
   if (!name) {
     return NextResponse.json({ error: "name required" }, { status: 400 });
   }
@@ -62,13 +64,15 @@ export async function POST(request: Request) {
     );
   }
 
-  // 3. Find an existing default-condition, non-foil row to increment.
+  // 3. Find an existing default-condition row with the same foil flag to bump.
+  // Foil and non-foil are kept as separate rows; condition is filled in later
+  // via the collection editor (Phase 3) so we treat NULL as the default bucket.
   const { data: existing, error: findErr } = await supabase
     .from("collection_items")
     .select("id, quantity")
     .eq("user_id", user.id)
     .eq("card_id", card.id)
-    .eq("foil", false)
+    .eq("foil", foil)
     .is("condition", null)
     .maybeSingle();
   if (findErr) {
@@ -96,7 +100,7 @@ export async function POST(request: Request) {
     user_id: user.id,
     card_id: card.id,
     quantity: 1,
-    foil: false,
+    foil,
   });
   if (insErr) {
     return NextResponse.json({ error: insErr.message }, { status: 500 });
