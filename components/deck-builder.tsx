@@ -2,7 +2,23 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  MouseSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
 import { ManaCurve } from "@/components/mana-curve";
+import {
+  DeckCollectionPane,
+  type CollectionPaneItem,
+} from "@/components/deck-collection-pane";
 import { FORMATS, hasCommanderZone, targetSizeFor } from "@/lib/formats";
 
 type LegalitiesMap = Record<string, string>;
@@ -93,27 +109,54 @@ function legalityStatus(
   }
 }
 
+// Drag payload shapes — kept as discriminated unions so onDragEnd can route.
+type DragKind =
+  | {
+      kind: "collection";
+      cardId: string;
+      name: string;
+      image: string | null;
+    }
+  | {
+      kind: "deck-card";
+      deckCardId: string;
+      currentZone: Zone;
+      name: string;
+      image: string | null;
+    };
+
 // ---------------------------------------------------------------------------
-// Top-level builder
+// Top-level builder (DndContext lives here)
 // ---------------------------------------------------------------------------
 
 export function DeckBuilder({
   deck,
   cards,
+  collection,
 }: {
   deck: DeckBuilderDeck;
   cards: DeckCardRow[];
+  collection: CollectionPaneItem[];
 }) {
   const router = useRouter();
   const [activeZone, setActiveZone] = useState<Zone>("mainboard");
   const [showExport, setShowExport] = useState(false);
+  const [activeDrag, setActiveDrag] = useState<DragKind | null>(null);
+  const [dndError, setDndError] = useState<string | null>(null);
+
+  // Mouse only — touch users keep the existing tap UX.
+  // distance:8 means a click won't accidentally start a drag.
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor),
+  );
 
   const showCommanderTab = hasCommanderZone(deck.format);
-  const visibleZones = useMemo<Zone[]>(() => {
-    return ZONES.filter((z) => z !== "commander" || showCommanderTab);
-  }, [showCommanderTab]);
+  const visibleZones = useMemo<Zone[]>(
+    () => ZONES.filter((z) => z !== "commander" || showCommanderTab),
+    [showCommanderTab],
+  );
 
-  // Keep activeZone valid if we hide the commander tab on a format change.
   useEffect(() => {
     if (!visibleZones.includes(activeZone)) setActiveZone("mainboard");
   }, [activeZone, visibleZones]);
@@ -155,103 +198,221 @@ export function DeckBuilder({
       .map((r) => {
         const c = getCard(r);
         return c
-          ? {
-              cmc: c.cmc,
-              type_line: c.type_line,
-              quantity: r.quantity,
-            }
+          ? { cmc: c.cmc, type_line: c.type_line, quantity: r.quantity }
           : null;
       })
       .filter((x): x is NonNullable<typeof x> => x !== null);
   }, [cardsByZone]);
 
+  function onDragStart(e: DragStartEvent) {
+    const data = e.active.data.current as DragKind | undefined;
+    if (data) setActiveDrag(data);
+    setDndError(null);
+  }
+
+  async function onDragEnd(e: DragEndEvent) {
+    setActiveDrag(null);
+    const { active, over } = e;
+    if (!over) return;
+
+    const activeData = active.data.current as DragKind | undefined;
+    const overData = over.data.current as { kind: "zone"; zone: Zone } | undefined;
+    if (!activeData || overData?.kind !== "zone") return;
+
+    const targetZone = overData.zone;
+
+    try {
+      if (activeData.kind === "collection") {
+        const res = await fetch(`/api/decks/${deck.id}/cards`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            card_id: activeData.cardId,
+            zone: targetZone,
+          }),
+        });
+        if (!res.ok) {
+          const j = (await res.json().catch(() => ({}))) as { error?: string };
+          setDndError(j.error ?? `HTTP ${res.status}`);
+          return;
+        }
+        setActiveZone(targetZone);
+        router.refresh();
+      } else if (activeData.kind === "deck-card") {
+        if (activeData.currentZone === targetZone) return;
+        const res = await fetch(`/api/deck-cards/${activeData.deckCardId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ zone: targetZone }),
+        });
+        if (!res.ok) {
+          const j = (await res.json().catch(() => ({}))) as { error?: string };
+          setDndError(j.error ?? `HTTP ${res.status}`);
+          return;
+        }
+        setActiveZone(targetZone);
+        router.refresh();
+      }
+    } catch (err) {
+      setDndError(err instanceof Error ? err.message : "drag failed");
+    }
+  }
+
   return (
-    <div className="flex flex-col gap-4">
-      <DeckHeader
-        deck={deck}
-        onChanged={() => router.refresh()}
-        onDeleted={() => router.push("/decks")}
-      />
+    <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
+      <div className="grid gap-4 lg:grid-cols-[280px_1fr] lg:gap-6">
+        <DeckCollectionPane items={collection} />
 
-      {/* Zone counts */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-neutral-400">
-        <span>
-          Mainboard{" "}
-          <span className={mainTargetClass}>
-            {mainCount}
-            {target ? ` / ${target}` : ""}
-          </span>
-        </span>
-        {showCommanderTab && (
-          <span>
-            Commander{" "}
-            <span className="text-neutral-200">{zoneCounts.commander}</span>
-          </span>
-        )}
-        <span>
-          Sideboard{" "}
-          <span className="text-neutral-200">{zoneCounts.sideboard}</span>
-        </span>
-        <span>
-          Maybeboard{" "}
-          <span className="text-neutral-200">{zoneCounts.maybeboard}</span>
-        </span>
-        <button
-          type="button"
-          onClick={() => setShowExport((v) => !v)}
-          className="ml-auto rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
-        >
-          {showExport ? "Hide export" : "Export"}
-        </button>
-      </div>
+        <div className="flex min-w-0 flex-col gap-4">
+          <DeckHeader
+            deck={deck}
+            onChanged={() => router.refresh()}
+            onDeleted={() => router.push("/decks")}
+          />
 
-      {showExport && (
-        <ExportPanel
-          deck={deck}
-          cardsByZone={cardsByZone}
-          showCommander={showCommanderTab}
-        />
-      )}
-
-      <ManaCurve cards={curveSource} />
-
-      <AddCardSearch
-        deckId={deck.id}
-        zone={activeZone}
-        onAdded={() => router.refresh()}
-      />
-
-      {/* Zone tabs */}
-      <div className="flex gap-1 overflow-x-auto rounded-md bg-neutral-900 p-1 text-xs">
-        {visibleZones.map((z) => {
-          const on = activeZone === z;
-          return (
-            <button
-              key={z}
-              type="button"
-              onClick={() => setActiveZone(z)}
-              className={`flex-1 whitespace-nowrap rounded px-3 py-1.5 transition ${
-                on
-                  ? "bg-neutral-800 text-neutral-100"
-                  : "text-neutral-400 hover:text-neutral-200"
-              }`}
-            >
-              {ZONE_LABELS[z]}
-              <span className="ml-1.5 text-neutral-500">
-                {zoneCounts[z]}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-neutral-400">
+            <span>
+              Mainboard{" "}
+              <span className={mainTargetClass}>
+                {mainCount}
+                {target ? ` / ${target}` : ""}
               </span>
+            </span>
+            {showCommanderTab && (
+              <span>
+                Commander{" "}
+                <span className="text-neutral-200">{zoneCounts.commander}</span>
+              </span>
+            )}
+            <span>
+              Sideboard{" "}
+              <span className="text-neutral-200">{zoneCounts.sideboard}</span>
+            </span>
+            <span>
+              Maybeboard{" "}
+              <span className="text-neutral-200">{zoneCounts.maybeboard}</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowExport((v) => !v)}
+              className="ml-auto rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
+            >
+              {showExport ? "Hide export" : "Export"}
             </button>
-          );
-        })}
+          </div>
+
+          {showExport && (
+            <ExportPanel
+              deck={deck}
+              cardsByZone={cardsByZone}
+              showCommander={showCommanderTab}
+            />
+          )}
+
+          <ManaCurve cards={curveSource} />
+
+          <AddCardSearch
+            deckId={deck.id}
+            zone={activeZone}
+            onAdded={() => router.refresh()}
+          />
+
+          <div className="flex gap-1 overflow-x-auto rounded-md bg-neutral-900 p-1 text-xs">
+            {visibleZones.map((z) => (
+              <ZoneTab
+                key={z}
+                zone={z}
+                label={ZONE_LABELS[z]}
+                count={zoneCounts[z]}
+                active={activeZone === z}
+                draggingNow={activeDrag !== null}
+                onClick={() => setActiveZone(z)}
+              />
+            ))}
+          </div>
+
+          {dndError && (
+            <p className="text-xs text-red-400">Drop failed: {dndError}</p>
+          )}
+
+          <ZoneCardList
+            cards={cardsByZone[activeZone]}
+            deckFormat={deck.format}
+            showCommanderTab={showCommanderTab}
+            onChanged={() => router.refresh()}
+          />
+        </div>
       </div>
 
-      <ZoneCardList
-        cards={cardsByZone[activeZone]}
-        deckFormat={deck.format}
-        showCommanderTab={showCommanderTab}
-        onChanged={() => router.refresh()}
-      />
-    </div>
+      <DragOverlay dropAnimation={null}>
+        {activeDrag ? (
+          <div className="pointer-events-none flex items-center gap-2 rounded border border-emerald-500 bg-neutral-900/95 p-1.5 shadow-2xl shadow-emerald-900/50">
+            {activeDrag.image ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={activeDrag.image}
+                alt=""
+                className="h-12 w-9 flex-shrink-0 rounded object-cover"
+              />
+            ) : (
+              <div className="h-12 w-9 flex-shrink-0 rounded bg-neutral-800" />
+            )}
+            <span className="pr-2 text-xs font-medium text-neutral-100">
+              {activeDrag.name}
+            </span>
+          </div>
+        ) : null}
+      </DragOverlay>
+    </DndContext>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Zone tab (acts as both a tab button AND a drop target on desktop)
+// ---------------------------------------------------------------------------
+
+function ZoneTab({
+  zone,
+  label,
+  count,
+  active,
+  draggingNow,
+  onClick,
+}: {
+  zone: Zone;
+  label: string;
+  count: number;
+  active: boolean;
+  draggingNow: boolean;
+  onClick: () => void;
+}) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: `zone-${zone}`,
+    data: { kind: "zone", zone },
+  });
+
+  // While a drag is in progress, give the tab a stronger affordance so the
+  // user can see it as a drop target.
+  const dropHint = draggingNow
+    ? isOver
+      ? "ring-2 ring-emerald-500 bg-emerald-900/30"
+      : "ring-1 ring-neutral-700"
+    : "";
+
+  return (
+    <button
+      ref={setNodeRef}
+      type="button"
+      onClick={onClick}
+      className={`flex-1 whitespace-nowrap rounded px-3 py-1.5 transition ${
+        active
+          ? "bg-neutral-800 text-neutral-100"
+          : "text-neutral-400 hover:text-neutral-200"
+      } ${dropHint}`}
+    >
+      {label}
+      <span className="ml-1.5 text-neutral-500">{count}</span>
+    </button>
   );
 }
 
@@ -607,7 +768,11 @@ function ZoneCardList({
   if (cards.length === 0) {
     return (
       <p className="py-6 text-center text-sm text-neutral-500">
-        No cards in this zone yet — add one above.
+        No cards in this zone yet — add one above
+        <span className="hidden lg:inline">
+          , or drag from the collection on the left
+        </span>
+        .
       </p>
     );
   }
@@ -664,6 +829,20 @@ function DeckCardEntry({
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
+  // Whole-row drag handle. Activation distance:8 keeps it from interfering
+  // with the inline +/- buttons or the toggle area.
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: `deck-card:${row.id}`,
+    data: {
+      kind: "deck-card",
+      deckCardId: row.id,
+      currentZone: row.zone,
+      name: card?.name ?? "",
+      image: card?.image_uris?.small ?? null,
+    },
+    disabled: !card,
+  });
+
   if (!card) return null;
 
   const legality = legalityStatus(card, deckFormat);
@@ -717,12 +896,19 @@ function DeckCardEntry({
   );
 
   return (
-    <li className="overflow-hidden rounded-md border border-neutral-800 bg-neutral-900/40">
+    <li
+      ref={setNodeRef}
+      {...listeners}
+      {...attributes}
+      className={`select-none overflow-hidden rounded-md border border-neutral-800 bg-neutral-900/40 transition ${
+        isDragging ? "opacity-30" : ""
+      }`}
+    >
       <div className="flex items-center gap-2 p-2">
         <button
           type="button"
           onClick={onToggle}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          className="flex min-w-0 flex-1 items-center gap-2 text-left lg:cursor-grab lg:active:cursor-grabbing"
         >
           {legality && (
             <span
@@ -742,9 +928,10 @@ function DeckCardEntry({
         <div className="flex flex-shrink-0 items-center gap-0.5">
           <button
             type="button"
-            onClick={() =>
-              patch({ quantity: Math.max(1, row.quantity - 1) })
-            }
+            onClick={(e) => {
+              e.stopPropagation();
+              void patch({ quantity: Math.max(1, row.quantity - 1) });
+            }}
             disabled={saving || row.quantity <= 1}
             className="h-7 w-7 rounded bg-neutral-800 text-neutral-200 hover:bg-neutral-700 disabled:opacity-30"
             aria-label="decrement"
@@ -753,7 +940,10 @@ function DeckCardEntry({
           </button>
           <button
             type="button"
-            onClick={() => patch({ quantity: row.quantity + 1 })}
+            onClick={(e) => {
+              e.stopPropagation();
+              void patch({ quantity: row.quantity + 1 });
+            }}
             disabled={saving}
             className="h-7 w-7 rounded bg-neutral-800 text-neutral-200 hover:bg-neutral-700 disabled:opacity-50"
             aria-label="increment"
@@ -808,6 +998,7 @@ function DeckCardEntry({
               alt={card.name}
               className="mx-auto mt-3 w-1/2 rounded-lg shadow-lg"
               loading="lazy"
+              draggable={false}
             />
           )}
         </div>
@@ -817,7 +1008,7 @@ function DeckCardEntry({
 }
 
 // ---------------------------------------------------------------------------
-// Export panel (plain text decklist + clipboard copy)
+// Export panel
 // ---------------------------------------------------------------------------
 
 function ExportPanel({
