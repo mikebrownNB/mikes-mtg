@@ -65,6 +65,53 @@ export async function fetchScryfallAutocomplete(q: string): Promise<string[]> {
 }
 
 /**
+ * Resolve a card name via Scryfall's `/cards/named?exact=` and upsert the
+ * result into the `cards` table using a service-role Supabase client.
+ *
+ * Used by both /api/cards/add (build the user's collection) and
+ * /api/decks/[id]/cards (build a deck) — keeps the lazy-mirror logic in
+ * one place.
+ *
+ * Returns either `{ ok: true, card }` with the Scryfall payload or
+ * `{ ok: false, error, status }` for the caller to surface to the client.
+ */
+export async function upsertCardByName(
+  service: {
+    from: (
+      table: string,
+    ) => {
+      upsert: (
+        row: unknown,
+        opts?: { onConflict?: string },
+      ) => Promise<{ error: { message: string } | null }>;
+    };
+  },
+  name: string,
+): Promise<
+  | { ok: true; card: ScryfallCard }
+  | { ok: false; error: string; status: number }
+> {
+  const url = new URL(`${SCRYFALL_BASE}/cards/named`);
+  url.searchParams.set("exact", name);
+  const res = await fetch(url.toString(), { headers: SCRYFALL_HEADERS });
+  if (!res.ok) {
+    return {
+      ok: false,
+      error: `Scryfall returned ${res.status} for "${name}"`,
+      status: res.status === 404 ? 404 : 502,
+    };
+  }
+  const card = (await res.json()) as ScryfallCard;
+  const { error } = await service
+    .from("cards")
+    .upsert(cardRowFromScryfall(card), { onConflict: "id" });
+  if (error) {
+    return { ok: false, error: `cards upsert: ${error.message}`, status: 500 };
+  }
+  return { ok: true, card };
+}
+
+/**
  * Map a Scryfall card payload to our `cards` table row shape.
  */
 export function cardRowFromScryfall(card: ScryfallCard) {

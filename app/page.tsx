@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { CardSearch } from "@/components/card-search";
 import { CollectionSummary } from "@/components/collection-summary";
+import { DecksSummary } from "@/components/decks-summary";
 
 // Auth + collection live in cookies + DB; never cache this page.
 export const dynamic = "force-dynamic";
@@ -44,7 +45,10 @@ export default async function Home() {
         <CardSearch />
       </section>
 
-      <CollectionSummary />
+      <div className="flex flex-col gap-2">
+        <CollectionSummary />
+        <DecksSummary />
+      </div>
     </main>
   );
 }

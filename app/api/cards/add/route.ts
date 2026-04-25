@@ -1,11 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
-import {
-  SCRYFALL_BASE,
-  SCRYFALL_HEADERS,
-  type ScryfallCard,
-  cardRowFromScryfall,
-} from "@/lib/scryfall";
+import { upsertCardByName } from "@/lib/scryfall";
 
 /**
  * Add a card to the signed-in user's collection.
@@ -38,31 +33,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "name required" }, { status: 400 });
   }
 
-  // 1. Resolve via Scryfall.
-  const scryfallUrl = new URL(`${SCRYFALL_BASE}/cards/named`);
-  scryfallUrl.searchParams.set("exact", name);
-  const scryRes = await fetch(scryfallUrl.toString(), {
-    headers: SCRYFALL_HEADERS,
-  });
-  if (!scryRes.ok) {
-    return NextResponse.json(
-      { error: `Scryfall returned ${scryRes.status} for "${name}"` },
-      { status: scryRes.status === 404 ? 404 : 502 },
-    );
-  }
-  const card = (await scryRes.json()) as ScryfallCard;
-
-  // 2. Upsert into cards (service role bypasses RLS).
+  // 1+2. Resolve via Scryfall and upsert into cards (service role).
   const service = createServiceClient();
-  const { error: cardErr } = await service
-    .from("cards")
-    .upsert(cardRowFromScryfall(card), { onConflict: "id" });
-  if (cardErr) {
-    return NextResponse.json(
-      { error: `cards upsert failed: ${cardErr.message}` },
-      { status: 500 },
-    );
+  const upsert = await upsertCardByName(service, name);
+  if (!upsert.ok) {
+    return NextResponse.json({ error: upsert.error }, { status: upsert.status });
   }
+  const card = upsert.card;
 
   // 3. Find an existing default-condition row with the same foil flag to bump.
   // Foil and non-foil are kept as separate rows; condition is filled in later
