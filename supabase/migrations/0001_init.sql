@@ -4,6 +4,13 @@
 -- is to run it once on a fresh project.
 
 -- ---------------------------------------------------------------------------
+-- Extensions
+-- ---------------------------------------------------------------------------
+-- pg_trgm powers the typeahead (name ILIKE / similarity) used in the manual lookup UI.
+-- Must be created BEFORE the trigram index below references gin_trgm_ops.
+create extension if not exists pg_trgm;
+
+-- ---------------------------------------------------------------------------
 -- Cards: local mirror of Scryfall data (populated nightly by /api/cron/scryfall)
 -- ---------------------------------------------------------------------------
 create table if not exists public.cards (
@@ -32,9 +39,6 @@ create index if not exists cards_oracle_id_idx
   on public.cards (oracle_id);
 create index if not exists cards_name_trgm_idx
   on public.cards using gin (name gin_trgm_ops);
-
--- pg_trgm powers the typeahead (name ILIKE / similarity) used in the manual lookup UI.
-create extension if not exists pg_trgm;
 
 -- ---------------------------------------------------------------------------
 -- Collection: cards the user owns
