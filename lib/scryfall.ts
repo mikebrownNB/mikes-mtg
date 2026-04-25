@@ -1,3 +1,5 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+
 /**
  * Scryfall API helpers. Per Scryfall's TOS we must send a User-Agent and Accept
  * header on every request. Free tier allows ~10 req/sec; we stay well under
@@ -76,16 +78,7 @@ export async function fetchScryfallAutocomplete(q: string): Promise<string[]> {
  * `{ ok: false, error, status }` for the caller to surface to the client.
  */
 export async function upsertCardByName(
-  service: {
-    from: (
-      table: string,
-    ) => {
-      upsert: (
-        row: unknown,
-        opts?: { onConflict?: string },
-      ) => Promise<{ error: { message: string } | null }>;
-    };
-  },
+  service: SupabaseClient,
   name: string,
 ): Promise<
   | { ok: true; card: ScryfallCard }
