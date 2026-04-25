@@ -16,4 +16,14 @@ SQL files in [`supabase/migrations/`](./supabase/migrations) — paste them into
 
 ## Phase status
 
-- **Phase 1 — Foundation:** scaffold pushed; Supabase + Vercel wiring is the next step.
+- **Phase 1 — Foundation:** done. Auth (magic link), manual card lookup via Scryfall autocomplete, and add-to-collection are wired up end-to-end.
+- **Phase 2 — Scanning:** next. Camera capture + Google Vision OCR + Scryfall fuzzy match.
+
+### Deferred from Phase 1
+
+The original plan included a nightly Vercel cron that bulk-imports Scryfall's
+`default_cards` JSON (~300 MB) into the local `cards` table. Vercel Hobby cron
+jobs cap at ~60s, so we'd risk timeouts. Instead the app *lazy-mirrors* cards:
+each card the user adds is fetched from Scryfall and upserted into `cards` on
+the spot. If/when offline-style fast typeahead is needed, revisit the bulk
+import (probably as a chunked / resumable job).

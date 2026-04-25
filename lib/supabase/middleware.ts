@@ -41,6 +41,14 @@ export async function updateSession(request: NextRequest) {
     pathname.startsWith("/login") || pathname.startsWith("/auth");
 
   if (!user && !isPublicPath) {
+    // API routes get a JSON 401 instead of an HTML redirect — clients calling
+    // /api/* expect JSON, not a browser auth flow.
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json(
+        { error: "unauthenticated" },
+        { status: 401 },
+      );
+    }
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("next", pathname);
