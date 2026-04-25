@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { CardSearch } from "@/components/card-search";
-import { CollectionList } from "@/components/collection-list";
+import { CollectionSummary } from "@/components/collection-summary";
 
 // Auth + collection live in cookies + DB; never cache this page.
 export const dynamic = "force-dynamic";
@@ -13,7 +13,7 @@ export default async function Home() {
   } = await supabase.auth.getUser();
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-8 px-6 py-12">
+    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-6 px-6 py-12">
       <header className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">mikes-mtg</h1>
@@ -44,12 +44,7 @@ export default async function Home() {
         <CardSearch />
       </section>
 
-      <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-neutral-300">
-          Collection
-        </h2>
-        <CollectionList />
-      </section>
+      <CollectionSummary />
     </main>
   );
 }

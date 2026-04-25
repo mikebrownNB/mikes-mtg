@@ -18,7 +18,8 @@ SQL files in [`supabase/migrations/`](./supabase/migrations) — paste them into
 
 - **Phase 1 — Foundation:** done. Auth (magic link), manual card lookup via Scryfall autocomplete, and add-to-collection are wired up end-to-end.
 - **Phase 2 — Scanning:** done. Camera capture (`<input capture="environment">`), client-side image resize, Google Vision OCR, Scryfall fuzzy match with autocomplete fallback, foil toggle, continuous-scan loop.
-- **Phase 3 — Collection management:** next. Filter/search/sort, edit quantity & condition, totals.
+- **Phase 3 — Collection management:** done. `/collection` page with name search, color/type filters, foil-only toggle, sort (recent/name/cmc/set/value), inline edit (quantity/foil/condition/notes), per-row remove with two-tap confirm, live totals.
+- **Phase 4 — Deck builder:** next.
 
 ### Deferred from Phase 1
 
